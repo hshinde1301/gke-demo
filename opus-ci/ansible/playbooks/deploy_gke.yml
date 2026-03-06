@@ -1,0 +1,6 @@
+
+- hosts: local
+  vars:
+    terraform_dir: "../../../infra-codebase/terraform/environments/dev"
+  roles:
+    - terraform

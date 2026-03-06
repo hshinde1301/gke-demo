@@ -1,0 +1,15 @@
+
+- name: Terraform Init
+  command: terraform init -backend-config=backend.tfvars
+  args:
+    chdir: "{{ terraform_dir }}"
+
+- name: Terraform Plan
+  command: terraform plan
+  args:
+    chdir: "{{ terraform_dir }}"
+
+- name: Terraform Apply
+  command: terraform apply -auto-approve
+  args:
+    chdir: "{{ terraform_dir }}"

@@ -1,0 +1,26 @@
+
+       Developer
+           │
+           ▼
+       Git Repository
+ (infra-codebase + opus-ci)
+           │
+           ▼
+       Jenkins Pipeline
+           │
+           ▼
+Jenkins Shared Library (Groovy)
+           │
+           ▼
+       Ansible Playbook
+           │
+           ▼
+     Terraform Execution
+           │
+           ▼
+ Remote State (GCS Backend)
+           │
+           ▼
+       GKE Cluster
+      /            \
+  Node 1          Node 2
