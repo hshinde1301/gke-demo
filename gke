@@ -1,0 +1,263 @@
+Short answer: Not fully yet.
+The code I showed creates Terraform variables, but it does not completely follow the same variable structure used in your existing repos (especially the dynamic variable pattern used by computeLinux, computeWindows, etc.).
+
+From reviewing your repo patterns:
+
+Variables usually come from Ansible → group_vars → tfvars
+
+Terraform components normally use:
+
+variables.tf
+
+terraform.tfvars or _dynamic.tfvars
+
+shared env/project/region structure
+
+Naming usually follows:
+
+project_id
+region
+labels
+env
+component_name
+
+So the GKE component should match that structure.
+
+Correct Terraform Variable Structure (Matching Existing Pattern)
+
+Inside infra-codebase-master
+
+terraform/components/gke_cluster/
+variables.tf (aligned with existing pattern)
+variable "project_id" {
+  description = "GCP Project ID"
+  type        = string
+}
+
+variable "region" {
+  description = "Deployment region"
+  type        = string
+}
+
+variable "env" {
+  description = "Environment name"
+  type        = string
+}
+
+variable "cluster_name" {
+  description = "GKE cluster name"
+  type        = string
+}
+
+variable "node_count" {
+  description = "Number of nodes"
+  type        = number
+  default     = 2
+}
+
+variable "machine_type" {
+  description = "Node machine type"
+  type        = string
+  default     = "e2-medium"
+}
+
+variable "labels" {
+  description = "Common labels"
+  type        = map(string)
+  default     = {}
+}
+terraform.tfvars (following existing pattern)
+terraform/components/gke_cluster/terraform.tfvars
+cluster_name = "opus-${env}-gke"
+node_count   = 2
+machine_type = "e2-medium"
+main.tf
+module "gke_cluster" {
+
+  source = "../../modules/gke-cluster"
+
+  project_id   = var.project_id
+  region       = var.region
+  cluster_name = var.cluster_name
+
+  node_count   = var.node_count
+  machine_type = var.machine_type
+}
+Module Variables
+terraform/modules/gke-cluster/variables.tf
+variable "project_id" {}
+variable "region" {}
+variable "cluster_name" {}
+variable "node_count" {}
+variable "machine_type" {}
+Why this matches your repo pattern
+
+Your existing design likely follows:
+
+Manifest
+   ↓
+Jenkins
+   ↓
+Ansible group_vars
+   ↓
+Terraform tfvars
+   ↓
+Terraform module
+
+So the variables must be compatible with Ansible variable injection, not hardcoded.
+
+Best Practice for Your Accelerator
+
+Follow the same pattern as existing components:
+
+terraform/components/
+    compute_linux
+    compute_windows
+    bucket
+    gke_cluster   <-- new
+
+Inside each:
+
+main.tf
+variables.tf
+terraform.tfvars
+backend.tf
+
+✅ Answer:
+Your repo structure supports Terraform variables, but the initial example I gave needs slight adjustment to perfectly match the existing variable injection pattern.
+
+
+To make GKE behave exactly like computeLinux, computeWindows, and Bucket in your current accelerator, you only need a small Jenkins shared library addition (≈6–8 lines).
+
+The goal is:
+
+infra-manifest.json
+      ↓
+ManifestObject.groovy
+      ↓
+Jenkins Shared Library
+      ↓
+Ansible Playbook
+      ↓
+Terraform Component
+
+Below is the exact minimal change.
+
+1️⃣ Add GKE flag in ManifestObject
+
+File:
+
+jenkins-groovy-master/src/com/org/ManifestObject.groovy
+
+Add this method (same style as compute flags):
+
+def getGkeCluster() {
+    try {
+        return regionList[index].gkeCluster?.toBoolean() ?: false
+    } catch (Exception e) {
+        return false
+    }
+}
+2️⃣ Add Execution Block in Jenkins Library
+
+Find the section where computeLinux / computeWindows / Bucket are executed.
+
+Example pattern you likely have:
+
+if (manifest.getComputeLinux()) {
+    executeComponent("compute_linux")
+}
+
+if (manifest.getComputeWindows()) {
+    executeComponent("compute_windows")
+}
+
+if (manifest.getBucket()) {
+    executeComponent("bucket")
+}
+
+Add GKE block:
+
+if (manifest.getGkeCluster()) {
+    executeComponent("gke_cluster")
+}
+
+That’s the 6-line change.
+
+3️⃣ Ensure Jenkins Calls Correct Ansible Playbook
+
+Your executeComponent() normally runs something like:
+
+sh """
+ansible-playbook \
+ansible/playbooks/pb-${component}.yml \
+-e region=${region}
+"""
+
+So when:
+
+component = gke_cluster
+
+it automatically runs:
+
+ansible/playbooks/pb-gke_cluster.yml
+4️⃣ Ansible Playbook
+infra-codebase-master/ansible/playbooks/pb-gke_cluster.yml
+---
+- name: Provision GKE Cluster
+  hosts: localhost
+  connection: local
+
+  roles:
+    - role: terraform
+      vars:
+        component: gke_cluster
+5️⃣ Manifest Example
+opus-iac-master/infra-manifest.json
+{
+  "regions": [
+    {
+      "region": {
+        "primaryRegion": "us-central1"
+      },
+      "computeLinux": true,
+      "computeWindows": false,
+      "Bucket": true,
+      "gkeCluster": true
+    }
+  ]
+}
+6️⃣ Final Pipeline Flow
+opus-iac
+   infra-manifest.json
+        ↓
+jenkins-groovy
+   ManifestObject.groovy
+        ↓
+component detection
+        ↓
+executeComponent("gke_cluster")
+        ↓
+ansible pb-gke_cluster.yml
+        ↓
+terraform/components/gke_cluster
+        ↓
+terraform/modules/gke-cluster
+        ↓
+GKE cluster created
+✅ Result
+
+Your accelerator now supports:
+
+computeLinux
+computeWindows
+Bucket
+GKE Cluster   ← new
+
+without:
+
+changing repo structure
+
+modifying pipeline architecture
+
+adding new repos
